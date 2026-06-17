@@ -1,0 +1,120 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── 유저 ────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  plan         Plan     @default(FREE)
+  fcmToken     String?
+  appleId      String?  @unique
+  googleId     String?  @unique
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  watches       Watch[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+enum Plan {
+  FREE
+  PRO
+}
+
+// ─── 감시 조건 ───────────────────────────────────────────────
+model Watch {
+  id        String      @id @default(cuid())
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  trainType  TrainType
+  depCode    String      // 출발역 코드
+  depName    String      // 출발역 이름
+  arrCode    String      // 도착역 코드
+  arrName    String      // 도착역 이름
+  date       String      // YYYY-MM-DD
+  timeFrom   String      // HH:mm
+  timeTo     String      // HH:mm
+  seatClass  SeatClass
+
+  status       WatchStatus @default(ACTIVE)
+  checkCount   Int         @default(0)
+  lastCheckedAt DateTime?
+  expiresAt    DateTime    // 당일 23:59에 자동 만료
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  notifications Notification[]
+
+  @@index([status, expiresAt])   // 폴러가 ACTIVE + 미만료 조건만 쿼리
+  @@index([userId])
+  @@map("watches")
+}
+
+enum TrainType {
+  KTX
+  SRT
+}
+
+enum SeatClass {
+  GENERAL
+  FIRST
+  ANY
+}
+
+enum WatchStatus {
+  ACTIVE
+  PAUSED
+  EXPIRED
+}
+
+// ─── 알림 이력 ───────────────────────────────────────────────
+model Notification {
+  id          String             @id @default(cuid())
+  userId      String
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  watchId     String
+  watch       Watch              @relation(fields: [watchId], references: [id], onDelete: Cascade)
+
+  status      NotificationStatus
+  seatsJson   Json               // AvailableSeat[] 스냅샷
+  message     String
+  sentAt      DateTime           @default(now())
+  readAt      DateTime?
+
+  @@index([userId, sentAt(sort: Desc)])
+  @@map("notifications")
+}
+
+enum NotificationStatus {
+  FOUND   // 빈자리 발견 → 푸시 발송
+  MISSED  // 발견했으나 이미 매진
+  EXPIRED // 감시 만료
+}
+
+// ─── 폴링 로그 (모니터링용) ──────────────────────────────────
+model PollLog {
+  id        String   @id @default(cuid())
+  watchId   String
+  success   Boolean
+  hasSeats  Boolean  @default(false)
+  durationMs Int
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@index([watchId, createdAt(sort: Desc)])
+  @@map("poll_logs")
+}
